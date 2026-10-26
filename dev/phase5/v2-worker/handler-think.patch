@@ -1,6 +1,13 @@
 diff --git a/handler.py b/handler.py
 --- a/handler.py
 +++ b/handler.py
-@@ -941 +941 @@
+@@ -939,8 +939,8 @@
+         payload = {"model": model, "prompt": prompt}
+ 
 -    for key in ("options", "format", "keep_alive", "tools", "system", "template"):
 +    for key in ("options", "format", "keep_alive", "tools", "system", "template", "think"):
+         if key in job_input:
+             payload[key] = job_input[key]
+ 
+     stream = bool(job_input.get("stream", False))
+     payload["stream"] = stream

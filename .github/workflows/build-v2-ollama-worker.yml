@@ -1,0 +1,69 @@
+name: Build V2 Ollama worker and publish to GHCR
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-v2-ollama-worker.yml'
+      - 'dev/phase5/v2-worker/**'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out WWS patch and offline test
+        uses: actions/checkout@v4
+
+      - name: Run offline pass-through tests
+        run: python dev/phase5/v2-worker/test_think_forwarding.py
+
+      - name: Fetch the pinned official worker revision and apply patch
+        shell: bash
+        env:
+          UPSTREAM_SHA: 1848765ec586c62acb205b8119e34455719aa178
+        run: |
+          set -euo pipefail
+          upstream="$RUNNER_TEMP/worker-ollama"
+          git init "$upstream"
+          git -C "$upstream" remote add origin https://github.com/runpod-workers/worker-ollama.git
+          git -C "$upstream" fetch --depth 1 origin "$UPSTREAM_SHA"
+          git -C "$upstream" checkout --detach FETCH_HEAD
+          test "$(git -C "$upstream" rev-parse HEAD)" = "$UPSTREAM_SHA"
+          git -C "$upstream" apply --check "$GITHUB_WORKSPACE/dev/phase5/v2-worker/handler-think.patch"
+          git -C "$upstream" apply "$GITHUB_WORKSPACE/dev/phase5/v2-worker/handler-think.patch"
+          git -C "$upstream" diff --check
+          test "$(git -C "$upstream" diff --name-only)" = "handler.py"
+          test "$(git -C "$upstream" diff --numstat -- handler.py)" = $'1\t1\thandler.py'
+          grep -Fx 'FROM ollama/ollama:0.32.15' "$upstream/Dockerfile"
+          git -C "$upstream" diff --exit-code -- Dockerfile
+          python "$GITHUB_WORKSPACE/dev/phase5/v2-worker/test_think_forwarding.py" --handler "$upstream/handler.py"
+          echo "UPSTREAM_DIR=$upstream" >> "$GITHUB_ENV"
+
+      - name: Set GHCR image name
+        id: image
+        shell: bash
+        run: |
+          owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          image="ghcr.io/${owner}/wws-qwen38-ollama-worker:v1.3.0-think-false-${GITHUB_SHA::7}"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "Published image will be: $image"
+
+      - name: Build linux/amd64 image
+        run: docker build --platform linux/amd64 --tag '${{ steps.image.outputs.image }}' "$UPSTREAM_DIR"
+
+      - name: Authenticate to GHCR with the workflow token
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Publish image to GHCR
+        run: docker push '${{ steps.image.outputs.image }}'
+
+      - name: Report exact image reference
+        run: |
+          echo 'RunPod image URI: ${{ steps.image.outputs.image }}'

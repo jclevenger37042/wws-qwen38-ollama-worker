@@ -1,0 +1,6 @@
+diff --git a/handler.py b/handler.py
+--- a/handler.py
++++ b/handler.py
+@@ -941 +941 @@
+-    for key in ("options", "format", "keep_alive", "tools", "system", "template"):
++    for key in ("options", "format", "keep_alive", "tools", "system", "template", "think"):
